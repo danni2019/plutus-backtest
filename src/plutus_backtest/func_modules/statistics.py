@@ -94,8 +94,10 @@ class BasicDesc:
     def evaluate_each_signal_performance(
             cls,
             returns: pd.Series,
-            signal: pd.DataFrame,
+            signal_df: pd.DataFrame,
             shift: int,
+            compounded_signal: pd.Series = None,
+            compounded_signal_shift: int = None
     ):
         """
         To evaluate all sub signal performance.
@@ -104,17 +106,19 @@ class BasicDesc:
                 So if you want to evaluate performance under a certain period of time, just pass in the return series
                 of that period, and signals will be automatically clipped accordingly.
         :param returns: the return series under which time period that you want to evaluate.
-        :param signal: a signal dataframe containing all sub signals
+        :param signal_df: a signal dataframe containing all sub signals
         :param shift: signal shift value
+        :param compounded_signal
+        :param compounded_signal_shift
         :return: evaluated result dataframe & all cumulative pnl dataframe.
         """
-        signal = signal.loc[signal.index.intersection(returns.index)].reindex(returns.index)
-        signal = signal.shift(shift).T.fillna(0)
+        signal_df = signal_df.loc[signal_df.index.intersection(returns.index)].reindex(returns.index)
+        signal_df = signal_df.shift(shift).T.fillna(0)
         eval_df = pd.DataFrame()
         benchmark_cumsum: pd.Series = returns.cumsum()
         benchmark_cumsum.name = 'benchmark'
         pnl_cumsum_df = pd.DataFrame(benchmark_cumsum)
-        for k, v in signal.iterrows():
+        for k, v in signal_df.iterrows():
             _pnl: pd.Series = returns * v
             _res_df = pd.DataFrame(
                 [_pnl, returns, v], index=['pnl', 'benchmark_pnl', 'signal'], columns=v.index
@@ -122,4 +126,13 @@ class BasicDesc:
             _eval = pd.DataFrame.from_dict(cls.evaluate(_res_df), orient='index', columns=[k])
             eval_df = pd.concat([eval_df, _eval], axis=1)
             pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl.cumsum(), columns=[k])], axis=1)
+        if compounded_signal is not None and compounded_signal_shift is not None:
+            v_com = compounded_signal.shift(compounded_signal_shift)
+            _pnl_com = returns * v_com
+            _res_df_com = pd.DataFrame(
+                [_pnl_com, returns, v_com], index=['pnl', 'benchmark_pnl', 'signal'], columns=v_com.index
+            ).T
+            _eval_com = pd.DataFrame.from_dict(cls.evaluate(_res_df_com), orient='index', columns=['compounded'])
+            eval_df = pd.concat([eval_df, _eval_com], axis=1)
+            pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl_com.cumsum(), columns=['compounded'])], axis=1)
         return eval_df, pnl_cumsum_df
