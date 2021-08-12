@@ -34,18 +34,19 @@ class BasicDesc:
         extraction_ratio = factor_pnl / full_profit
 
         return {
-            'alpha': round(alpha, 2),
-            'beta': round(beta, 2),
-            'sharpe': round(sharpe, 2),
-            'benchmark_sharpe': round(bench_sharpe, 2),
-            'max_drawdown': round(max_down, 2),
+            'alpha': round(alpha, 4),
+            'beta': round(beta, 4),
+            'sharpe': round(sharpe, 4),
+            'benchmark_sharpe': round(bench_sharpe, 4),
+            'max_single_day_drawdown': round(pnl_sum.min(), 4),
+            'max_drawdown': round(max_down, 4),
             'factor_pnl': res_df['pnl'].sum(),
             'factor_annual_pnl': ann_return_strat,
             'benchmark_pnl': res_df['benchmark_pnl'].sum(),
             'benchmark_annual_pnl': ann_return_bench,
-            'tail_ratio': round(t_r, 2),
-            'turnover': round(turnover, 2),
-            'profit_extraction_ratio': round(extraction_ratio, 2),
+            'tail_ratio': round(t_r, 4),
+            'turnover': round(turnover, 4),
+            'profit_extraction_ratio': round(extraction_ratio, 4),
             'w/l_ratio (exclude flats)': wnl_ratio
         }
 
