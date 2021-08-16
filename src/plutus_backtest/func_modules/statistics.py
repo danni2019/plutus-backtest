@@ -114,6 +114,7 @@ class BasicDesc:
         :return: evaluated result dataframe & all cumulative pnl dataframe.
         """
         signal_df = signal_df.loc[signal_df.index.intersection(returns.index)].reindex(returns.index)
+        compounded_signal = compounded_signal.loc[compounded_signal.index.intersection(returns.index)].reindex(returns.index)
         signal_df = signal_df.shift(shift).T.fillna(0)
         eval_df = pd.DataFrame()
         benchmark_cumsum: pd.Series = returns.cumsum()
@@ -121,18 +122,20 @@ class BasicDesc:
         pnl_cumsum_df = pd.DataFrame(benchmark_cumsum)
         for k, v in signal_df.iterrows():
             _pnl: pd.Series = returns * v
-            _res_df = pd.DataFrame(
-                [_pnl, returns, v], index=['pnl', 'benchmark_pnl', 'signal'], columns=v.index
-            ).T
+            _res_df = pd.concat(
+                [_pnl, returns, v], axis=1
+            )
+            _res_df.columns = ['pnl', 'benchmark_pnl', 'signal']
             _eval = pd.DataFrame.from_dict(cls.evaluate(_res_df), orient='index', columns=[k])
             eval_df = pd.concat([eval_df, _eval], axis=1)
             pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl.cumsum(), columns=[k])], axis=1)
         if compounded_signal is not None and compounded_signal_shift is not None:
             v_com = compounded_signal.shift(compounded_signal_shift)
             _pnl_com = returns * v_com
-            _res_df_com = pd.DataFrame(
-                [_pnl_com, returns, v_com], index=['pnl', 'benchmark_pnl', 'signal'], columns=v_com.index
-            ).T
+            _res_df_com = pd.concat(
+                [_pnl_com, returns, v_com], axis=1
+            )
+            _res_df_com.columns = ['pnl', 'benchmark_pnl', 'signal']
             _eval_com = pd.DataFrame.from_dict(cls.evaluate(_res_df_com), orient='index', columns=['compounded'])
             eval_df = pd.concat([eval_df, _eval_com], axis=1)
             pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl_com.cumsum(), columns=['compounded'])], axis=1)
