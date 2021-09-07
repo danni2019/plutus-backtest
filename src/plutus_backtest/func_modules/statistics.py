@@ -3,12 +3,25 @@ import numpy as np
 from empyrical import alpha_beta, sharpe_ratio, max_drawdown, annual_return, tail_ratio
 
 
-class BasicDesc:
-    def __init__(self, df: pd.DataFrame):
-        self.df = df
+class BasicEval:
+    def __init__(self):
+        pass
 
-    def backtest_eval(self):
-        return self.evaluate(self.df)
+    @staticmethod
+    def emp_eval(pnl_sum: pd.Series):
+        sharpe = sharpe_ratio(pnl_sum, period='daily')
+        max_down = max_drawdown(pnl_sum)
+        wnl_ratio = len(pnl_sum[pnl_sum > 0]) / len(pnl_sum[pnl_sum != 0]) if len(pnl_sum[pnl_sum != 0]) != 0 else 0
+        ann_return_strat = annual_return(pnl_sum, period='daily')
+        t_r = tail_ratio(pnl_sum)
+        return {
+            'sharpe': round(sharpe, 4),
+            'max_single_day_drawdown': round(pnl_sum.min(), 4),
+            'max_drawdown': round(max_down, 4),
+            'factor_annual_pnl': ann_return_strat,
+            'tail_ratio': round(t_r, 4),
+            'w/l_ratio (exclude flats)': wnl_ratio
+        }
 
     @staticmethod
     def evaluate(res_df):
@@ -49,6 +62,71 @@ class BasicDesc:
             'profit_extraction_ratio': round(extraction_ratio, 4),
             'w/l_ratio (exclude flats)': wnl_ratio
         }
+
+    @classmethod
+    def evaluate_each_signal_performance(
+            cls,
+            returns: pd.Series,
+            signal_df: pd.DataFrame,
+            shift: int,
+            compounded_signal: pd.Series = None,
+            compounded_signal_shift: int = None
+    ):
+        """
+        To evaluate all sub signal performance.
+        ***
+        Notice: the signal df will be loc and clipped according to the index of return series.
+                So if you want to evaluate performance under a certain period of time, just pass in the return series
+                of that period, and signals will be automatically clipped accordingly.
+        :param returns: the return series under which time period that you want to evaluate.
+        :param signal_df: a signal dataframe containing all sub signals
+        :param shift: signal shift value
+        :param compounded_signal
+        :param compounded_signal_shift
+        :return: evaluated result dataframe & all cumulative pnl dataframe.
+        """
+        signal_df = signal_df.loc[signal_df.index.intersection(returns.index)].reindex(returns.index)
+        signal_df = signal_df.shift(shift).T.fillna(0)
+        eval_df = pd.DataFrame()
+        benchmark_cumsum: pd.Series = returns.cumsum()
+        benchmark_cumsum.name = 'benchmark'
+        pnl_cumsum_df = pd.DataFrame(benchmark_cumsum)
+        vals_df = pd.DataFrame()
+        for k, v in signal_df.iterrows():
+            _pnl: pd.Series = returns * v
+            val_s = _pnl.copy()
+            val_s.name = k
+            vals_df = vals_df.append(val_s)
+            _res_df = pd.concat(
+                [_pnl, returns, v], axis=1
+            )
+            _res_df.columns = ['pnl', 'benchmark_pnl', 'signal']
+            _eval = pd.DataFrame.from_dict(cls.evaluate(_res_df), orient='index', columns=[k])
+            eval_df = pd.concat([eval_df, _eval], axis=1)
+            pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl.cumsum(), columns=[k])], axis=1)
+        if compounded_signal is not None and compounded_signal_shift is not None:
+            compounded_signal = compounded_signal.loc[
+                compounded_signal.index.intersection(returns.index)
+            ].reindex(returns.index)
+            v_com = compounded_signal.shift(compounded_signal_shift)
+            _pnl_com = returns * v_com
+            _res_df_com = pd.concat(
+                [_pnl_com, returns, v_com], axis=1
+            )
+            _res_df_com.columns = ['pnl', 'benchmark_pnl', 'signal']
+            _eval_com = pd.DataFrame.from_dict(cls.evaluate(_res_df_com), orient='index', columns=['compounded'])
+            eval_df = pd.concat([eval_df, _eval_com], axis=1)
+            pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl_com.cumsum(), columns=['compounded'])], axis=1)
+        return eval_df, pnl_cumsum_df, vals_df
+
+
+class BasicDesc(BasicEval):
+    def __init__(self, df: pd.DataFrame):
+        super().__init__()
+        self.df = df
+
+    def backtest_eval(self):
+        return self.evaluate(self.df)
 
     def count_performance(self):
         """count positive/negative returns"""
@@ -91,52 +169,3 @@ class BasicDesc:
         ).T
         return pnl_s
 
-    @classmethod
-    def evaluate_each_signal_performance(
-            cls,
-            returns: pd.Series,
-            signal_df: pd.DataFrame,
-            shift: int,
-            compounded_signal: pd.Series = None,
-            compounded_signal_shift: int = None
-    ):
-        """
-        To evaluate all sub signal performance.
-        ***
-        Notice: the signal df will be loc and clipped according to the index of return series.
-                So if you want to evaluate performance under a certain period of time, just pass in the return series
-                of that period, and signals will be automatically clipped accordingly.
-        :param returns: the return series under which time period that you want to evaluate.
-        :param signal_df: a signal dataframe containing all sub signals
-        :param shift: signal shift value
-        :param compounded_signal
-        :param compounded_signal_shift
-        :return: evaluated result dataframe & all cumulative pnl dataframe.
-        """
-        signal_df = signal_df.loc[signal_df.index.intersection(returns.index)].reindex(returns.index)
-        compounded_signal = compounded_signal.loc[compounded_signal.index.intersection(returns.index)].reindex(returns.index)
-        signal_df = signal_df.shift(shift).T.fillna(0)
-        eval_df = pd.DataFrame()
-        benchmark_cumsum: pd.Series = returns.cumsum()
-        benchmark_cumsum.name = 'benchmark'
-        pnl_cumsum_df = pd.DataFrame(benchmark_cumsum)
-        for k, v in signal_df.iterrows():
-            _pnl: pd.Series = returns * v
-            _res_df = pd.concat(
-                [_pnl, returns, v], axis=1
-            )
-            _res_df.columns = ['pnl', 'benchmark_pnl', 'signal']
-            _eval = pd.DataFrame.from_dict(cls.evaluate(_res_df), orient='index', columns=[k])
-            eval_df = pd.concat([eval_df, _eval], axis=1)
-            pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl.cumsum(), columns=[k])], axis=1)
-        if compounded_signal is not None and compounded_signal_shift is not None:
-            v_com = compounded_signal.shift(compounded_signal_shift)
-            _pnl_com = returns * v_com
-            _res_df_com = pd.concat(
-                [_pnl_com, returns, v_com], axis=1
-            )
-            _res_df_com.columns = ['pnl', 'benchmark_pnl', 'signal']
-            _eval_com = pd.DataFrame.from_dict(cls.evaluate(_res_df_com), orient='index', columns=['compounded'])
-            eval_df = pd.concat([eval_df, _eval_com], axis=1)
-            pnl_cumsum_df = pd.concat([pnl_cumsum_df, pd.DataFrame(_pnl_com.cumsum(), columns=['compounded'])], axis=1)
-        return eval_df, pnl_cumsum_df
