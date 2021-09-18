@@ -18,6 +18,7 @@ class BasicEval:
             'sharpe': round(sharpe, 4),
             'max_single_day_drawdown': round(pnl_sum.min(), 4),
             'max_drawdown': round(max_down, 4),
+            'factor_pnl': pnl_sum.values.sum(),
             'factor_annual_pnl': ann_return_strat,
             'tail_ratio': round(t_r, 4),
             'w/l_ratio (exclude flats)': wnl_ratio
