@@ -22,25 +22,49 @@ def _stop_loss(
         stop_loss_by_diff: float,
         accu_stop_loss_by_diff: float,
 ):
+    if stop_loss_by_diff <= accu_stop_loss_by_diff:
+        limit_ = stop_loss_by_diff
+        stp = 1
+    else:
+        limit_ = accu_stop_loss_by_diff
+        stp = 2
     if position == 0:
         return 0, last_price, current_price, 0, stop_loss_by_diff, accu_stop_loss_by_diff
-    elif trade_direction < 0 and current_high - last_price > stop_loss_by_diff:
-        strat_pnl = -stop_loss_by_diff * position
-        return strat_pnl, last_price, stop_loss_by_diff + last_price, 1, np.inf, np.inf
-    elif trade_direction > 0 and last_price - current_low > stop_loss_by_diff:
-        strat_pnl = -stop_loss_by_diff * position
-        return strat_pnl, last_price, last_price - stop_loss_by_diff, 1, np.inf, np.inf
-    elif trade_direction < 0 and current_high - last_price > accu_stop_loss_by_diff:
-        strat_pnl = -accu_stop_loss_by_diff * position
-        return strat_pnl, last_price, accu_stop_loss_by_diff + last_price, 1, np.inf, np.inf
-    elif trade_direction > 0 and last_price - current_low > accu_stop_loss_by_diff:
-        strat_pnl = -accu_stop_loss_by_diff * position
-        return strat_pnl, last_price, last_price - accu_stop_loss_by_diff, 1, np.inf, np.inf
+    elif trade_direction < 0 and current_high - last_price > limit_:
+        strat_pnl = -limit_ * position
+        return strat_pnl, last_price, limit_ + last_price, stp, np.inf, np.inf
+    elif trade_direction > 0 and last_price - current_low > limit_:
+        strat_pnl = -limit_ * position
+        return strat_pnl, last_price, last_price - limit_, stp, np.inf, np.inf
     else:
         strat_pnl = (current_price - last_price) * position * trade_direction
         stop_remains = stop_loss_by_diff + ((current_price - last_price) * trade_direction)
         accu_stop_remains = accu_stop_loss_by_diff + ((current_price - last_price) * trade_direction)
         return strat_pnl, last_price, current_price, 0, stop_remains, accu_stop_remains
+
+
+@jit(nopython=True)
+def _stop_profit(
+        trade_direction: int,
+        position: float,
+        current_high: float,
+        current_low: float,
+        current_price: float,
+        last_price: float,
+        stop_profit_by_diff: float,
+):
+    if position == 0:
+        return 0, last_price, current_price, 0, stop_profit_by_diff
+    elif trade_direction < 0 and last_price - current_low > stop_profit_by_diff:
+        strat_pnl = stop_profit_by_diff * position
+        return strat_pnl, last_price, last_price - stop_profit_by_diff, 3, np.inf
+    elif trade_direction > 0 and current_high - last_price > stop_profit_by_diff:
+        strat_pnl = stop_profit_by_diff * position
+        return strat_pnl, last_price, last_price + stop_profit_by_diff, 3, np.inf
+    else:
+        strat_pnl = (current_price - last_price) * position * trade_direction
+        stop_remains = stop_profit_by_diff - ((current_price - last_price) * trade_direction)
+        return strat_pnl, last_price, current_price, 0, stop_remains
 
 
 @jit(nopython=True)
@@ -50,15 +74,19 @@ def _loop(
         source_: np.ndarray,
         friction_loss: float = 0,
         stop_loss_type: int = 0,
+        stop_profit_type: int = 0,
 ):
     """
     :param action_price:
     :param action_on_0:
     :param source_: 'open', 'close', 'high', 'low', 'signal', 'pre_close',
-                    'contract', 'stop_loss', 'timestamp', 'day_mark', 'accumulative_stop_loss' as ndarray
+                    'contract', 'stop_loss', 'timestamp', 'day_mark', 'accumulative_stop_loss',
+                    'stop_profit' as ndarray
     :param friction_loss:
     :param stop_loss_type: 0 / 1  0 -- bar stop loss
                                   1 -- daily stop loss
+    :param stop_profit_type: 0 / 1  0 -- bar stop
+                                  1 -- daily stop
     :return:
     """
     # record sequences: direction, position, open_price, contract
@@ -71,7 +99,7 @@ def _loop(
     strat_pnl, bench_price = float64(0), float64(0)
 
     # initiate stop_loss and accu_stop_loss
-    stop_diff = accu_stop_diff = np.inf
+    stop_diff = accu_stop_diff = profit_diff = np.inf
 
     for v in source_:
         # previous trade record shift.
@@ -94,9 +122,11 @@ def _loop(
         else:
             # no signal, not on day close
             if action_on_0 == 0:
+                # if close on signal 0
                 _direc = float64(0)
                 _pos = float64(0)
             else:
+                # if hold on signal 0
                 _direc = prev_record[0]
                 _pos = prev_record[1]
         trade_record = [
@@ -117,8 +147,22 @@ def _loop(
                     stop_diff = np.inf
         else:
             stop_diff = np.inf
+        if v[11] != 0:
+            if stop_profit_type == 0:
+                profit_diff = v[11] * trade_record[2]
+            else:
+                if v[9] == 1:
+                    profit_diff = v[11] * trade_record[2]
+                elif profit_diff < 0:
+                    trade_record[0] = 0
+                    trade_record[1] = 0
+                    profit_diff = np.inf
+        else:
+            profit_diff = np.inf
         if v[10] != 0:
-            if trade_record[1] != 0 and trade_record[1] * trade_record[0] != prev_record[1] * prev_record[0]:
+            # accumulative stop loss will only be initialized when there is no position.
+            # so that continuous trades can share one accumulative stop loss quota.
+            if trade_record[1] == 0:
                 accu_stop_diff = v[10] * trade_record[2]
             elif accu_stop_diff < 0:
                 trade_record[0] = 0
@@ -147,51 +191,62 @@ def _loop(
                     and when you are trading at different action_price, 'pre_xxx' will be adjusted automatically.
                     However, you should bear in mind that 'pre_close' is the only label that doesn't contain pricing gap
                 """
-                if v[7] != 0:
-                    strat_pnl, prev_p, mark_p, stopped, stop_r, acc_stop_r = _stop_loss(
+                strat_pnl, prev_p, mark_p, stopped, stop_r, acc_stop_r = _stop_loss(
+                    trade_direction=prev_record[0],
+                    position=prev_record[1],
+                    current_high=v[2],
+                    current_low=v[3],
+                    current_price=trade_record[2],
+                    last_price=v[5],
+                    stop_loss_by_diff=stop_diff,
+                    accu_stop_loss_by_diff=accu_stop_diff
+                )
+                if stopped not in [1, 2]:
+                    strat_pnl, prev_p, mark_p, stopped, profit_r = _stop_profit(
                         trade_direction=prev_record[0],
                         position=prev_record[1],
                         current_high=v[2],
                         current_low=v[3],
                         current_price=trade_record[2],
                         last_price=v[5],
-                        stop_loss_by_diff=stop_diff,
-                        accu_stop_loss_by_diff=accu_stop_diff
+                        stop_profit_by_diff=profit_diff
                     )
-                    friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped == 1 else \
-                        -abs(trade_record[1] - prev_record[1]) * friction_loss
-                    stop_diff = stop_r
-                    accu_stop_diff = acc_stop_r
                 else:
-                    strat_pnl = (trade_record[2] - v[5]) * prev_record[1] * prev_record[0]
-                    prev_p = v[5]
-                    mark_p = trade_record[2]
-                    friction = -abs(trade_record[1] - prev_record[1]) * friction_loss
-                    stopped = 0
+                    profit_r = profit_diff
+                friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped != 0 else \
+                    -abs(trade_record[1] - prev_record[1]) * friction_loss
+                stop_diff = stop_r
+                accu_stop_diff = acc_stop_r
+                profit_diff = profit_r
             else:
-                # if there is any stop loss limit
-                if v[7] != 0:
-                    strat_pnl, prev_p, mark_p, stopped, stop_r, acc_stop_r = _stop_loss(
+                strat_pnl, prev_p, mark_p, stopped, stop_r, acc_stop_r = _stop_loss(
+                    trade_direction=prev_record[0],
+                    position=prev_record[1],
+                    current_high=v[2],
+                    current_low=v[3],
+                    current_price=trade_record[2],
+                    last_price=prev_record[2],
+                    stop_loss_by_diff=stop_diff,
+                    accu_stop_loss_by_diff=accu_stop_diff
+                )
+                if stopped not in [1, 2]:
+                    strat_pnl, prev_p, mark_p, stopped, profit_r = _stop_profit(
                         trade_direction=prev_record[0],
                         position=prev_record[1],
                         current_high=v[2],
                         current_low=v[3],
                         current_price=trade_record[2],
                         last_price=prev_record[2],
-                        stop_loss_by_diff=stop_diff,
-                        accu_stop_loss_by_diff=accu_stop_diff
+                        stop_profit_by_diff=profit_diff
                     )
-                    friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped == 1 else \
-                        -abs(trade_record[1] - prev_record[1]) * friction_loss
-                    stop_diff = stop_r
-                    accu_stop_diff = acc_stop_r
                 else:
-                    strat_pnl = (trade_record[2] - prev_record[2]) * prev_record[1] * prev_record[0]
-                    prev_p = prev_record[2]
-                    mark_p = trade_record[2]
-                    friction = -abs(trade_record[1] - prev_record[1]) * friction_loss
-                    stopped = 0
-        if stopped == 1:
+                    profit_r = profit_diff
+                friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped != 0 else \
+                    -abs(trade_record[1] - prev_record[1]) * friction_loss
+                stop_diff = stop_r
+                accu_stop_diff = acc_stop_r
+                profit_diff = profit_r
+        if stopped in [1, 2, 3]:
             trade_record[0] = 0
             trade_record[1] = 0
         pnl = np.append(pnl, [strat_pnl, prev_p, mark_p, friction, stopped])
@@ -252,7 +307,9 @@ class LoopBacktest:
             self,
             sig: pd.Series,
             stop_loss: Union[None, pd.Series, float],
+            stop_profit: Union[None, pd.Series, float],
             stop_loss_period: str,
+            stop_profit_period: str,
             accum_stop_loss: Union[None, pd.Series, float],
             friction_loss: float = 0
     ):
@@ -263,10 +320,15 @@ class LoopBacktest:
         stop loss is a type of lagging data.
         :param sig:
         :param stop_loss:
+        :param stop_profit:
         :param stop_loss_period: should be 'bar' or 'day'
                                 -- meaning stop loss should be triggered on each bar(for minute/hour level data)
                                  or each day
-        :param accum_stop_loss:
+        :param stop_profit_period: should be 'bar' or 'day'
+                                -- meaning stop profit should be triggered on each bar(for minute/hour level data)
+                                 or each day
+        :param accum_stop_loss: accumulative stop loss quota is for several consecutive trades
+                                sharing one collective stop loss quota
         :param friction_loss:
         :return:
         """
@@ -282,6 +344,14 @@ class LoopBacktest:
             res_df['stop_loss'] = stop_loss if stop_loss is not None else 0
         else:
             res_df['stop_loss'] = abs(res_df['stop_loss'])
+
+        if isinstance(stop_profit, pd.Series):
+            res_df['stop_profit'] = stop_profit.loc[stop_profit.index.intersection(res_df.index)].reindex(res_df.index)
+            res_df['stop_profit'] = abs(res_df['stop_profit']).fillna(method='pad')
+        elif 'stop_profit' not in res_df.columns:
+            res_df['stop_profit'] = stop_profit if stop_profit is not None else 0
+        else:
+            res_df['stop_profit'] = abs(res_df['stop_profit'])
 
         if isinstance(accum_stop_loss, pd.Series):
             res_df['accum_stop_loss'] = accum_stop_loss.loc[
@@ -315,7 +385,7 @@ class LoopBacktest:
         # columns into backtest loop
         passin_cols = [
             'open', 'close', 'high', 'low', 'signal', f'pre_{self.action_price}', 'contract',
-            'stop_loss', 'ts', 'mk', 'accum_stop_loss'
+            'stop_loss', 'ts', 'mk', 'accum_stop_loss', 'stop_profit'
         ]
         # process 'pre_xxx'
         if f"pre_{self.action_price}" not in res_df.columns:
@@ -326,13 +396,15 @@ class LoopBacktest:
         resource_ = resource_.to_numpy()
 
         styp = 0 if stop_loss_period == 'bar' else 1
+        ptyp = 0 if stop_profit_period == 'bar' else 1
 
         benchmark_, strat_ = _loop(
             action_price=passin_cols.index(self.action_price),
             action_on_0=self.action_on_0,
             source_=resource_,
             friction_loss=friction_loss,
-            stop_loss_type=styp
+            stop_loss_type=styp,
+            stop_profit_type=ptyp
         )
         strat_ = strat_[5:]
         bench_len = int(len(benchmark_) / 2)
