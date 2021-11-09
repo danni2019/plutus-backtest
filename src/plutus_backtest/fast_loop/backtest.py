@@ -249,6 +249,7 @@ def _loop(
         if stopped in [1, 2, 3]:
             trade_record[0] = 0
             trade_record[1] = 0
+        strat_pnl += friction
         pnl = np.append(pnl, [strat_pnl, prev_p, mark_p, friction, stopped])
     return benchmark_pnl, pnl
 
@@ -417,12 +418,13 @@ class LoopBacktest:
         strat_df = pd.DataFrame(
             strat_array, columns=['pnl', 'open_price', 'mark_price', 'friction_loss', 'is_stopped'], index=res_df.index
         )
-        strat_df['pnl'] = strat_df['pnl'] - strat_df['friction_loss']
+        # strat_df['pnl'] = strat_df['pnl'] - strat_df['friction_loss']
         strat_df['open_price'] = strat_df['open_price'].replace(to_replace=0, value=np.nan)
         res_df['position_init_price'] = strat_df['open_price']
         res_df['position_markup_price'] = strat_df['mark_price']
         res_df['is_stopped'] = strat_df['is_stopped']
         res_df['pnl_chg'] = strat_df['pnl']
+        res_df['friction_loss'] = strat_df['friction_loss']
         res_df['pnl_chg_cumsum'] = res_df['pnl_chg'].cumsum()
         res_df['pnl_pctg'] = strat_df['pnl'] / strat_df['open_price']
         res_df['pnl_pctg_cumsum'] = res_df['pnl_pctg'].cumsum()
