@@ -213,8 +213,7 @@ def _loop(
                     )
                 else:
                     profit_r = profit_diff
-                friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped != 0 else \
-                    -abs(trade_record[1] - prev_record[1]) * friction_loss
+                friction = -abs(trade_record[1] * trade_record[0] - prev_record[1] * prev_record[0]) * friction_loss
                 stop_diff = stop_r
                 accu_stop_diff = acc_stop_r
                 profit_diff = profit_r
@@ -241,8 +240,7 @@ def _loop(
                     )
                 else:
                     profit_r = profit_diff
-                friction = -(trade_record[1] + prev_record[1]) * friction_loss if stopped != 0 else \
-                    -abs(trade_record[1] - prev_record[1]) * friction_loss
+                friction = -abs(trade_record[1] * trade_record[0] - prev_record[1] * prev_record[0]) * friction_loss
                 stop_diff = stop_r
                 accu_stop_diff = acc_stop_r
                 profit_diff = profit_r
