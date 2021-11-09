@@ -273,7 +273,6 @@ class LoopBacktest:
         md.index = pd.to_datetime(md.index)
         md.sort_index(ascending=True, inplace=True)
         self.md = md
-        self.sig = pd.Series(dtype=float)
 
         self.action_on_0 = 0 if action_on_0 == 'close' else 1
         self.action_price = action_price
@@ -298,9 +297,6 @@ class LoopBacktest:
                 self.day_close = time.fromisoformat(day_close)
             else:
                 self.day_close = day_close
-
-    def __feed_signal(self, sig: pd.Series):
-        self.sig = sig
 
     def plain_backtest(
             self,
