@@ -33,12 +33,13 @@ class VecWithPosAdjBacktest:
             cushion: float,
             init_price: float = None,
             cap: float = None,
+            signal_padding: bool = False
     ):
         res_df = self.df.copy()
         sig.index = pd.to_datetime(sig.index)
         res_df['signal'] = sig.loc[sig.index.intersection(res_df.index)].reindex(res_df.index)
         res_df = res_df.loc[res_df[(res_df.index >= sig.index.min()) & (res_df.index <= sig.index.max())].index]
-        res_df['signal'] = res_df['signal'].fillna(0)
+        res_df['signal'] = res_df['signal'].fillna(0) if not signal_padding else res_df['signal'].fillna(method='bfill')
         res_df['pnl'] = res_df['return'] * res_df['signal']
 
         # calculate minimum capital required.
@@ -50,7 +51,7 @@ class VecWithPosAdjBacktest:
         )
         # transform pnl from price diff to percentage based on minimum initial capital
         pnl_cumsum_: pd.Series = (res_df['pnl'] * market_value_per_point).cumsum()
-        pnl_cumsum_ = pnl_cumsum_ - [pnl_cumsum_[:i + 1].max() for i in range(len(pnl_cumsum_))]
+        pnl_cumsum_ = pnl_cumsum_ - pnl_cumsum_.expanding().max()
         pnl_cumsum_ = pd.Series(np.where(pnl_cumsum_ < -(cushion * min_cap), '1', '0'), index=pnl_cumsum_.index).replace(
             to_replace='0', method='pad'
         )
