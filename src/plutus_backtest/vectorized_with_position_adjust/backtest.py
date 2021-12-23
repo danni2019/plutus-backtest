@@ -24,7 +24,7 @@ class VecWithPosAdjBacktest:
         md['return'] = (md['close'] - md['pre_close']).fillna(0)
         self.df = md
 
-    def plain_backtest(
+    def _plain_backtest(
             self,
             sig: pd.Series,
             max_hands: int,
@@ -33,14 +33,15 @@ class VecWithPosAdjBacktest:
             cushion: float,
             init_price: float = None,
             cap: float = None,
-            signal_padding: bool = False
+            signal_padding: bool = True
     ):
         res_df = self.df.copy()
         sig.index = pd.to_datetime(sig.index)
         res_df['signal'] = sig.loc[sig.index.intersection(res_df.index)].reindex(res_df.index)
         res_df = res_df.loc[res_df[(res_df.index >= sig.index.min()) & (res_df.index <= sig.index.max())].index]
+        s_ = res_df['signal'].fillna(0).groupby(res_df.index.date).sum()
         res_df['signal'] = res_df['signal'].fillna(0) if not signal_padding else res_df['signal'].fillna(method='bfill')
-        res_df['pnl'] = res_df['return'] * res_df['signal']
+        res_df['pnl'] = res_df['return'] * res_df['signal'] * market_value_per_point
 
         # calculate minimum capital required.
         ini_price = res_df[['open', 'close', 'high', 'low']].mean(axis=1).iloc[0] if init_price is None else init_price
@@ -50,20 +51,75 @@ class VecWithPosAdjBacktest:
             f", with safe cushion: {round(cushion * 100)}% -- Maximum Loss Allowed: {round(min_cap * cushion, 2)}"
         )
         # transform pnl from price diff to percentage based on minimum initial capital
-        pnl_cumsum_: pd.Series = (res_df['pnl'] * market_value_per_point).cumsum()
+        pnl_cumsum_: pd.Series = res_df['pnl'].cumsum()
         pnl_cumsum_ = pnl_cumsum_ - pnl_cumsum_.expanding().max()
         pnl_cumsum_ = pd.Series(np.where(pnl_cumsum_ < -(cushion * min_cap), '1', '0'), index=pnl_cumsum_.index).replace(
             to_replace='0', method='pad'
         )
 
-        res_df['pnl'] = (res_df['pnl'] * market_value_per_point) / min_cap
         if '1' in pnl_cumsum_.tolist():
             logger.warning(f"Cushion breached at {pnl_cumsum_[pnl_cumsum_ == '1'].index.min()}")
             res_df['pnl'] = np.where(pnl_cumsum_ == '1', 0, res_df['pnl'])
             flg_ = 0
         else:
             flg_ = 1
-        res_df['pnl_cumsum'] = res_df['pnl'].cumsum()
-        res_df['benchmark_pnl'] = (res_df['return'] * abs(res_df['signal']) * market_value_per_point) / min_cap
-        res_df['benchmark_pnl_cumsum'] = res_df['benchmark_pnl'].cumsum()
-        return res_df, flg_
+
+        res_df_day = res_df[['pnl', 'return']].groupby(res_df.index.date).sum()
+        res_df_day['close'] = res_df['close'].groupby(res_df.index.date).last()
+        res_df_day['signal'] = s_
+        res_df_day['benchmark_pnl'] = res_df_day['return'] * market_value_per_point
+
+        res_df_day.index = pd.to_datetime(res_df_day.index)
+
+        return res_df_day[['return', 'close', 'benchmark_pnl']], \
+               res_df_day['pnl'], \
+               res_df_day['signal'], \
+               min_cap, \
+               flg_
+
+    def plain_backtest(
+            self,
+            sig: pd.Series,
+            max_hands: int,
+            market_value_per_point: float,
+            leverage: float,
+            cushion: float,
+            init_price: float = None,
+            cap: float = None,
+            signal_padding: bool = True
+    ):
+        res_df_day, r2, sig, cap, flg = self._plain_backtest(
+            sig, max_hands, market_value_per_point, leverage, cushion, init_price, cap, signal_padding
+        )
+        res_df_day.index = pd.to_datetime(res_df_day.index)
+        res_df_day['pnl'] = r2
+        res_df_day['signal'] = sig
+        res_df_day['pnl_cumsum'] = res_df_day['pnl'].cumsum()
+        res_df_day['benchmark_pnl_cumsum'] = res_df_day['benchmark_pnl'].cumsum()
+        res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
+            'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
+        ]] / cap
+        return res_df_day, flg
+
+    def multi_strategy_plain_backtest(self, *args):
+        p2, signal = pd.Series(dtype=float), pd.Series(dtype=int)
+        tot_cap = 0
+        for arg_ls in args:
+            res_df_day, r2, sig, cap, flg = self._plain_backtest(
+                *arg_ls
+            )
+            tot_cap += cap
+            if not p2.empty:
+                p2 += r2
+                signal += sig
+            else:
+                p2 = r2
+                signal = sig
+        res_df_day['pnl'] = p2
+        res_df_day['signal'] = signal
+        res_df_day['pnl_cumsum'] = res_df_day['pnl'].cumsum()
+        res_df_day['benchmark_pnl_cumsum'] = res_df_day['benchmark_pnl'].cumsum()
+        res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
+            'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
+        ]] / tot_cap
+        return res_df_day, flg
