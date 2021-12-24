@@ -65,13 +65,16 @@ class VecWithPosAdjBacktest:
             flg_ = 1
 
         res_df_day = res_df[['pnl', 'return']].groupby(res_df.index.date).sum()
+        res_df_day['open'] = res_df['open'].groupby(res_df.index.date).first()
         res_df_day['close'] = res_df['close'].groupby(res_df.index.date).last()
+        res_df_day['high'] = res_df['high'].groupby(res_df.index.date).max()
+        res_df_day['low'] = res_df['low'].groupby(res_df.index.date).min()
         res_df_day['signal'] = s_
         res_df_day['benchmark_pnl'] = res_df_day['return'] * market_value_per_point
 
         res_df_day.index = pd.to_datetime(res_df_day.index)
 
-        return res_df_day[['return', 'close', 'benchmark_pnl']], \
+        return res_df_day[['return', 'open', 'high', 'low', 'close', 'benchmark_pnl']], \
                res_df_day['pnl'], \
                res_df_day['signal'], \
                min_cap, \
@@ -86,7 +89,8 @@ class VecWithPosAdjBacktest:
             cushion: float,
             init_price: float = None,
             cap: float = None,
-            signal_padding: bool = True
+            signal_padding: bool = True,
+            show_pnl_by_percentage: bool = True,
     ):
         res_df_day, r2, sig, cap, flg = self._plain_backtest(
             sig, max_hands, market_value_per_point, leverage, cushion, init_price, cap, signal_padding
@@ -96,12 +100,13 @@ class VecWithPosAdjBacktest:
         res_df_day['signal'] = sig
         res_df_day['pnl_cumsum'] = res_df_day['pnl'].cumsum()
         res_df_day['benchmark_pnl_cumsum'] = res_df_day['benchmark_pnl'].cumsum()
-        res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
-            'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
-        ]] / cap
+        if show_pnl_by_percentage:
+            res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
+                'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
+            ]] / cap
         return res_df_day, flg
 
-    def multi_strategy_plain_backtest(self, *args):
+    def multi_strategy_plain_backtest(self, *args, show_pnl_by_percentage: bool = True):
         p2, signal = pd.Series(dtype=float), pd.Series(dtype=int)
         tot_cap = 0
         for arg_ls in args:
@@ -119,7 +124,8 @@ class VecWithPosAdjBacktest:
         res_df_day['signal'] = signal
         res_df_day['pnl_cumsum'] = res_df_day['pnl'].cumsum()
         res_df_day['benchmark_pnl_cumsum'] = res_df_day['benchmark_pnl'].cumsum()
-        res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
-            'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
-        ]] / tot_cap
+        if show_pnl_by_percentage:
+            res_df_day[['pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum']] = res_df_day[[
+                'pnl', 'pnl_cumsum', 'benchmark_pnl', 'benchmark_pnl_cumsum'
+            ]] / tot_cap
         return res_df_day, flg
