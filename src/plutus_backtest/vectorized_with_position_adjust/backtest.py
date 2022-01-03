@@ -36,7 +36,8 @@ class VecWithPosAdjBacktest:
             cushion: float,
             init_price: float = None,
             cap: float = None,
-            original_timeframe: bool = False
+            original_timeframe: bool = False,
+            fixed_cost: float = 0,
     ):
         sig.fillna(0, inplace=True)
         res_df = self.df.copy()
@@ -47,7 +48,9 @@ class VecWithPosAdjBacktest:
             res_df['signal'] = res_df['signal'].fillna(method='pad').shift(sig_shift).fillna(0)
         else:
             res_df['signal'] = res_df['signal'].shift(sig_shift).fillna(0)
-        res_df['pnl'] = res_df['return'] * res_df['signal'] * market_value_per_point
+        res_df['pnl'] = (
+            res_df['return'] * res_df['signal'] - (fixed_cost * s_.sum() / len(res_df))
+        ) * market_value_per_point
         # calculate minimum capital required.
         ini_price = res_df[['open', 'close', 'high', 'low']].mean(axis=1).iloc[0] if init_price is None else init_price
         min_cap = (max_hands * market_value_per_point * ini_price) / ((leverage + 1) * (1 - cushion)) if cap is None else cap
@@ -103,10 +106,11 @@ class VecWithPosAdjBacktest:
             cap: float = None,
             show_pnl_by_percentage: bool = True,
             original_timeframe: bool = False,
+            fixed_cost: float = 0,
     ):
         res_df_day, r2, sig, cap, flg = self._plain_backtest(
             sig, sig_shift, sig_padding, max_hands, market_value_per_point, leverage, cushion, init_price, cap,
-            original_timeframe=original_timeframe
+            original_timeframe=original_timeframe, fixed_cost=fixed_cost
         )
         res_df_day.index = pd.to_datetime(res_df_day.index)
         res_df_day['pnl'] = r2
@@ -123,14 +127,16 @@ class VecWithPosAdjBacktest:
             self,
             *args,
             show_pnl_by_percentage: bool = True,
-            original_timeframe: bool = False
+            original_timeframe: bool = False,
+            fixed_cost: float = 0
     ):
         p2, signal = pd.Series(dtype=float), pd.Series(dtype=int)
         tot_cap = 0
         for arg_ls in args:
             res_df_day, r2, sig, cap, flg = self._plain_backtest(
                 *arg_ls,
-                original_timeframe=original_timeframe
+                original_timeframe=original_timeframe,
+                fixed_cost=fixed_cost
             )
             tot_cap += cap
             if not p2.empty:
