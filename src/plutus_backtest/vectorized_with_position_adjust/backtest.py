@@ -4,9 +4,9 @@ backtest logic with position adjustment.
 
 import pandas as pd
 import numpy as np
-from utils.src.tool.logger import log
+import logging
 
-logger = log(__file__, 'backtest')
+logger = logging.getLogger(__name__)
 
 
 class VecWithPosAdjBacktest:
@@ -18,6 +18,7 @@ class VecWithPosAdjBacktest:
             self,
             md: pd.DataFrame,
     ):
+        md = md.copy()
         md.index = pd.to_datetime(md.index)
         md.sort_index(ascending=True, inplace=True)
         if "pre_close" not in md.columns:
@@ -39,18 +40,19 @@ class VecWithPosAdjBacktest:
             original_timeframe: bool = False,
             fixed_cost: float = 0,
     ):
-        sig.fillna(0, inplace=True)
+        sig = sig.fillna(0)
         res_df = self.df.copy()
+        sig = sig.copy()
         sig.index = pd.to_datetime(sig.index)
         res_df['signal'] = sig.loc[sig.index.intersection(res_df.index)].reindex(res_df.index)
         s_ = res_df['signal'].fillna(0).groupby(res_df.index.date).sum()
         if sig_padding:
-            res_df['signal'] = res_df['signal'].fillna(method='pad').shift(sig_shift).fillna(0)
+            res_df['signal'] = res_df['signal'].ffill().shift(sig_shift).fillna(0)
         else:
             res_df['signal'] = res_df['signal'].shift(sig_shift).fillna(0)
-        res_df['pnl'] = (
-            res_df['return'] * res_df['signal'] - (fixed_cost * s_.sum() / len(res_df))
-        ) * market_value_per_point
+        exposure = res_df['signal']
+        turnover = exposure.diff().fillna(exposure).abs()
+        res_df['pnl'] = (res_df['return'] * exposure - fixed_cost * turnover) * market_value_per_point
         # calculate minimum capital required.
         ini_price = res_df[['open', 'close', 'high', 'low']].mean(axis=1).iloc[0] if init_price is None else init_price
         min_cap = (max_hands * market_value_per_point * ini_price) / ((leverage + 1) * (1 - cushion)) if cap is None else cap
@@ -61,13 +63,11 @@ class VecWithPosAdjBacktest:
         # transform pnl from price diff to percentage based on minimum initial capital
         pnl_cumsum_: pd.Series = res_df['pnl'].cumsum()
         pnl_cumsum_ = pnl_cumsum_ - pnl_cumsum_.expanding().max()
-        pnl_cumsum_ = pd.Series(np.where(pnl_cumsum_ < -(cushion * min_cap), '1', '0'), index=pnl_cumsum_.index).replace(
-            to_replace='0', method='pad'
-        )
+        stopped = pnl_cumsum_.lt(-(cushion * min_cap)).cummax()
 
-        if '1' in pnl_cumsum_.tolist():
-            logger.warning(f"Cushion breached at {pnl_cumsum_[pnl_cumsum_ == '1'].index.min()}")
-            res_df['pnl'] = np.where(pnl_cumsum_ == '1', 0, res_df['pnl'])
+        if stopped.any():
+            logger.warning("Cushion breached at %s", stopped[stopped].index.min())
+            res_df['pnl'] = res_df['pnl'].where(~stopped, 0)
             flg_ = 0
         else:
             flg_ = 1

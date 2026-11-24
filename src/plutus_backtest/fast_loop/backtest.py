@@ -6,9 +6,7 @@ import pandas as pd
 from typing import Union
 from datetime import time, datetime
 from numba import jit, float64, int32
-from utils.src.tool.logger import log
 
-logger = log(__file__, 'backtest')
 
 
 @jit(nopython=True)
@@ -270,6 +268,7 @@ class LoopBacktest:
                             'close' price is recommended because this works best with the model.
         :param day_close: if indicated, positions will be closed out at this specific time.
         """
+        md = md.copy()
         md.index = pd.to_datetime(md.index)
         md.sort_index(ascending=True, inplace=True)
         self.md = md
@@ -328,13 +327,14 @@ class LoopBacktest:
         :return:
         """
         res_df = self.md.copy()
+        sig = sig.copy()
         sig.index = pd.to_datetime(sig.index)
         res_df['signal'] = sig.loc[sig.index.intersection(res_df.index)].reindex(res_df.index)
         res_df['signal'] = res_df['signal'].fillna(0)
 
         if isinstance(stop_loss, pd.Series):
             res_df['stop_loss'] = stop_loss.loc[stop_loss.index.intersection(res_df.index)].reindex(res_df.index)
-            res_df['stop_loss'] = abs(res_df['stop_loss']).fillna(method='pad')
+            res_df['stop_loss'] = abs(res_df['stop_loss']).ffill()
         elif 'stop_loss' not in res_df.columns:
             res_df['stop_loss'] = stop_loss if stop_loss is not None else 0
         else:
@@ -342,7 +342,7 @@ class LoopBacktest:
 
         if isinstance(stop_profit, pd.Series):
             res_df['stop_profit'] = stop_profit.loc[stop_profit.index.intersection(res_df.index)].reindex(res_df.index)
-            res_df['stop_profit'] = abs(res_df['stop_profit']).fillna(method='pad')
+            res_df['stop_profit'] = abs(res_df['stop_profit']).ffill()
         elif 'stop_profit' not in res_df.columns:
             res_df['stop_profit'] = stop_profit if stop_profit is not None else 0
         else:
@@ -352,7 +352,7 @@ class LoopBacktest:
             res_df['accum_stop_loss'] = accum_stop_loss.loc[
                 accum_stop_loss.index.intersection(res_df.index)
             ].reindex(res_df.index)
-            res_df['accum_stop_loss'] = abs(res_df['accum_stop_loss']).fillna(method='pad')
+            res_df['accum_stop_loss'] = abs(res_df['accum_stop_loss']).ffill()
         elif 'accum_stop_loss' not in res_df.columns:
             res_df['accum_stop_loss'] = accum_stop_loss if accum_stop_loss is not None else 0
         else:
@@ -427,18 +427,3 @@ class LoopBacktest:
         res_df['benchmark_pnl_pctg'] = benchmark_df['benchmark_pnl'] / benchmark_df['bench_open_price']
         res_df['benchmark_pnl_pctg_cumsum'] = res_df['benchmark_pnl_pctg'].cumsum()
         return res_df
-
-
-if __name__ == "__main__":
-
-    a = datetime(2021, 10, 1, 15, 00, 00)
-    print(a.date)
-    # c = datetime(2021, 10, 2, 15, 00, 00)
-    # b = pd.Timestamp(a)
-    # # print(b)
-    # # print(a.timestamp())
-    # # print(c.timestamp())
-    # # print(c.timestamp() - a.timestamp())
-    # # print(np.inf == np.inf)
-    # print(datetime.utcfromtimestamp(1630680900))
-    # print(datetime.utcfromtimestamp(1630681200.0))

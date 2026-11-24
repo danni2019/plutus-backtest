@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plutus-backtest"
+version = "0.1.0"
+description = "Historical vectorized and event-loop backtest engines"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+dependencies = ["numpy>=1.26,<3", "pandas>=2.2,<3", "numba>=0.61,<1"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["plutus_backtest*"]
